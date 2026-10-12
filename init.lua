@@ -37,8 +37,8 @@ function Network.nova(layers, activactions)
 
         if  i > 1 then
 
-            net.weigth[i] = matriz.aleatoria(layers[i-1], layers[i], 1000, 1000)/1000
-            net.bias[i] = matriz.aleatoria(1, layers[i], 1000, 1000)/1000
+            net.weigth[i] = matriz.aleatoria(layers[i-1], layers[i], -1000, 1000)/1000
+            net.bias[i] = matriz.aleatoria(1, layers[i], -1000, 1000)/1000
 
             ---@type fun(n: number,i?: integer, j?:integer):number
             local function no_activation_param(n) return n end
@@ -57,7 +57,10 @@ end
 
 
 
-function Network:forward()
+function Network:forward(entrada)
+    if entrada and type(entrada)=="table" then
+        self.layers[1] = entrada
+    end
     for i=2, #self.layers do
         
         local z = self.layers[i-1] * self.weigth[i] + self.bias[i]
@@ -66,7 +69,29 @@ function Network:forward()
     end
 end
 
----@type fun(m:Matriz|number):number
+
+
+---@param x Matriz
+---@param a Matriz
+---@param dy Matriz
+---@param w Matriz
+---@param b Matriz
+---@param lr number
+---@param f function
+function Network.backprop(x, a, dy, w, b, lr, f)
+    local df = function (x) return (f(x+0.01) - f(x))/0.01 end
+
+    local dz = dy:copiar():map(function (v, i, j)
+        return v * a:map(df)[i][j]
+    end)
+
+    local dW = x:transposta() * dz
+    local db = dz:soma_linhas()
+    local dx = dz * w:transposta()
+
+    return w - dW * lr, b - db * lr, dx
+end
+
 local function mean(m)
     local sum, i =0, 0
     if type(m) == "number" then return m end
@@ -78,43 +103,49 @@ local function mean(m)
     return sum/i
 end
 
----@param x Matriz
----@param dy Matriz
----@param w Matriz
----@param b Matriz
----@param lr number
-function Network.backprop(x, dy, w, b, lr)
-    local dW = x:transposta() * dy
-    local db = x:soma_linhas()
-    local dx = dy * w:transposta()
-
-    return w - dW * lr, b + db * lr, dx
-end
-
-
-
 ---@param expected Matriz
 ---@param learning_rate number
 ---@param epoch integer
-function Network:trainer(expected, learning_rate, epoch)
+function Network:trainer(entrada, expected, learning_rate, epoch, batch_size, record)
+    batch_size = batch_size or 32
 
     for i= 1, epoch or 1000 do
-        self:forward()
-
         local n = #self.layers
-        local N = expected.linhas
 
-        local dy = (self.layers[n] - expected) * (2/N)
+        self:forward(entrada)
+
+
+        local N = expected.linhas * 2
+        local dif = self.layers[n] - expected
+        local dy = dif * (2/N)
+        local loss = (dif*dif:transposta()):determinante()
+
+        if i%(N) == 0 then
+            print(
+                ("epoch: %s;\tloss: %s; ")
+                :format(
+                    i,
+                    loss
+                )
+                    
+            )
+            if record and type(record) == "table" then
+                if not record.loss then record.loss = {} end
+
+                record.loss[i] = loss
+            end
+        end
 
         for i = n, 2, -1 do
-            local erro
             self.weigth[i], self.bias[i], dy = self.backprop(
                 self.layers[i-1],
+                self.layers[i],
                 dy,
                 self.weigth[i],
                 self.bias[i],
-                learning_rate or 0.01
-            ) 
+                learning_rate or 0.01,
+                self.activactions[i]
+            )
         end
     end
 end
@@ -122,28 +153,68 @@ end
 
 
 --- test
+if select("#", ...) then
 
+    local record = {}
+    local batch = 500
+    local epoch = 10000
+    local learning_rate = 0.01
+    
+    local _n = 5
+    local N = _n * 3
 
-local n, msg = Network.nova(
-    {2, 3, 2},
-    function (n)
-        return math.max(0, n)
+    local pontos, alvo = {}, {}
+    for i = 1, N do
+        pontos[i] = i/_n          -- 0.1 .. 3.0
+        alvo[i]   = math.sin(i/_n)
     end
-)
+    local x = matriz.de_tabela({pontos})
+    local y = matriz.de_tabela({alvo})
 
-if not n then
-    print(msg)
+
+    local n, msg = Network.nova(
+        {
+            x.colunas,
+            8, 8, 8,
+            y.colunas
+        },
+        function (n)
+            return 1/(1 + math.exp(-n))
+        end
+    )
+
+    if not n then
+        print(msg)
+    end
+
+
+    n:trainer(
+        x,
+        y,
+        learning_rate,
+        epoch,
+        batch,
+        record
+    )
+
+    local fig = plt.figure(640, 480)
+    fig:xlabel("epoch")
+    fig:ylabel("loss")
+    fig:grid(true)
+
+    local ys = record.loss
+    local xs = {} do
+        for i = 1, N do
+            xs[i] = i/N
+        end
+    end
+    fig:plot(xs, y[#y], {color=plt.RED, label="real"})
+    fig:plot(xs, n.layers[#n.layers][1], {color=plt.BLUE, label="predict"})
+    fig:legend(true)
+
+    print(n.layers[#n.layers])
+    fig:save("treinamento.png")
 end
-
-
-n:trainer(
-    matriz.de_tabela({{1, 0.1}}),
-    0.001,
-    10000
-)
-
-print(n.layers[#n.layers])
-
 
 
 
