@@ -1274,7 +1274,7 @@ function Matriz:soma_linhas()
         somas[coluna] = (somas[coluna] or 0) + valor
         return valor
     end)
-    return Matriz.de_tabela({somas})  -- tabela comum: {soma_col1, soma_col2, ...}
+    return Matriz.vetor_linha(somas)  -- tabela comum: {soma_col1, soma_col2, ...}
 end
 
 
